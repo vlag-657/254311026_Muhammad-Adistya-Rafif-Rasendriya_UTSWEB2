@@ -7,6 +7,8 @@ use App\Http\Controllers\ForumController;
 use App\Http\Controllers\HasilKuisController;
 use App\Http\Controllers\KuisController;
 use App\Http\Controllers\ProfilController;
+use App\Http\Controllers\ReviewController;
+use App\Http\views\reviewindex\indexreview;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -16,6 +18,7 @@ Route::prefix('v1')->group(function () {
         Route::post('register', [AuthController::class, 'register']);
         Route::post('login',    [AuthController::class, 'login']);
         Route::post('refresh',  [AuthController::class, 'refresh']);
+        Route::get('review', [ReviewController::class, 'index']);
     });
 
     Route::get('artikel',      [ArtikelController::class, 'index']);
@@ -39,6 +42,12 @@ Route::prefix('v1')->group(function () {
         Route::get('forum/postingan/{id}',          [ForumController::class, 'show']);
         Route::get('forum/postingan/{id}/balasan',  [ForumController::class, 'balasan']);
         Route::post('forum/postingan/{id}/balasan', [ForumController::class, 'balas']);
+
+        Route::get('review',           [ReviewController::class, 'index']);
+        Route::post('review',          [ReviewController::class, 'store']);
+        Route::get('review/{id}',      [ReviewController::class, 'show']);
+        Route::put('review/{id}',      [ReviewController::class, 'update']);
+        Route::delete('review/{id}',   [ReviewController::class, 'destroy']);
 
         // ---- User saja ----
         Route::middleware('role:user')->group(function () {

@@ -406,6 +406,156 @@ async function loadProfile() {
     } catch (error) { showError(error); }
 }
 
+// ==========================================
+// FUNGSI-FUNGSI REVIEW
+// ==========================================
+
+async function loadReview(page = 1, search = '') {
+    if (!requireUser()) return;
+    setPage('Review User', '<div class="toolbar"><form class="search-box" data-search="reviews"><input class="field" name="q" value="' + escapeHtml(search) + '" placeholder="Cari review..." aria-label="Cari review"></form></div><div class="review-grid" id="review-list"><div class="empty-state">Memuat review...</div></div><div id="review-pages"></div><div style="margin-top:20px"><a href="/review/post" class="button button-primary">Buat review baru</a></div>', 'review user');
+    try {
+        const response = await apiRequest(`/review?${queryString({ page, limit: 9, q: search, sort: '-dibuat_pada' })}`);
+        const reviews = response.data || [];
+        document.querySelector('#review-list').innerHTML = reviews.length ? reviews.map((review) => `<article class="content-card"><h3>${escapeHtml(review.judul || 'Review')}</h3><p>${escapeHtml(review.isi || 'Uji pengetahuanmu tentang energi bersih dan terjangkau.')}</p><div class="card-meta"><span>Ditulis oleh ${escapeHtml(review.penulis?.nama || 'Pengguna')}</span><a class="text-link" href="/review/${encodeURIComponent(review.id)}">Baca selengkapnya →</a></div></article>`).join('') : emptyState('Belum ada review', 'Coba kata kunci lain atau kunjungi lagi nanti.');
+        document.querySelector('#review-pages').innerHTML = renderPagination(response.meta, page, 'reviews');
+    } catch (error) { showError(error); }
+}
+
+async function loadReviewDetail(id) {
+    if (!requireUser()) return;
+    app.innerHTML = '<div class="page-wrap"><div class="empty-state">Memuat review...</div></div>';
+    try {
+        const response = await apiRequest(`/review/${encodeURIComponent(id)}`);
+        const review = response.data;
+        document.title = `${review.judul} — SDG7Learn`;
+        app.innerHTML = `<div class="page-wrap"><a class="text-link" href="/review">← Semua review</a><div class="page-heading" style="margin-top:18px"><div><span class="eyebrow"><span class="eyebrow-dot"></span>Review</span><h1>${escapeHtml(review.judul || 'Review')}</h1><p>${escapeHtml(review.isi || '')}</p></div></div></div>`;
+    } catch (error) { showError(error); }
+}
+
+function createReviewPage() {
+    if (!requireUser()) return;
+    setPage('Buat Review Baru', '<div class="panel" style="max-width:740px"><form class="form-stack" data-form="review"><div class="form-alert" data-form-alert hidden></div><div class="form-field"><label for="judul">Judul Review</label><input class="field" id="judul" name="judul" required maxlength="255" placeholder="Judul review kamu..."><small class="field-error" data-error="judul"></small></div><div class="form-field"><label for="isi">Isi Review</label><textarea class="text-field" id="isi" name="isi" required placeholder="Tulis ulasan atau pendapatmu..."></textarea><small class="field-error" data-error="isi"></small></div><div><button class="button button-primary" type="submit">Kirim Review →</button></div></form></div>', 'Review User');
+}
+
+async function submitreview(form) {
+    const data = Object.fromEntries(new FormData(form).entries());
+    const button = form.querySelector('[type="submit"]');
+    button.disabled = true;
+    try {
+        const response = await apiRequest('/review', {
+            method: 'POST', body: JSON.stringify(data),
+        });
+        location.assign(`/review/${encodeURIComponent(response.data.id)}`);
+    } catch (error) {
+        fieldErrors(form, error.details);
+        const alert = form.querySelector('[data-form-alert]');
+        if (alert && !error.details.length) { alert.hidden = false; alert.textContent = error.message; }
+        button.disabled = false;
+    }
+}
+
+async function deletereview(id) {
+    if (!requireUser()) return;
+    if (!confirm('Apakah kamu yakin ingin menghapus review ini? Tindakan ini tidak dapat dibatalkan.')) return;
+    try {
+        await apiRequest(`/review/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        toast('Review berhasil dihapus.');
+        location.assign('/review');
+    } catch (error) {
+        toast(error.message, true);
+    }
+}
+
+// ==========================================
+// ROUTER & EVENT LISTENER UTAMA
+// ==========================================
+
+function route() {
+    const path = location.pathname;
+    updateHeader();
+
+    if (path === '/' || path === '') {
+        loadHome();
+    } else if (path === '/artikel') {
+        loadArticles();
+    } else if (path.startsWith('/artikel/')) {
+        loadArticle(path.replace('/artikel/', ''));
+    } else if (path === '/kuis') {
+        loadQuizzes();
+    } else if (path.startsWith('/kuis/')) {
+        loadQuiz(path.replace('/kuis/', ''));
+    } else if (path === '/hasil-kuis') {
+        loadResults();
+    } else if (path.startsWith('/hasil-kuis/')) {
+        loadResult(path.replace('/hasil-kuis/', ''));
+    } else if (path === '/forum') {
+        loadForum();
+    } else if (path === '/forum/buat') {
+        createPostPage();
+    } else if (path.startsWith('/forum/')) {
+        loadPost(path.replace('/forum/', ''));
+    } else if (path === '/review') {
+        loadReview();
+    } else if (path === '/review/post') {
+        createReviewPage();
+    } else if (path.startsWith('/review/')) {
+        loadReviewDetail(path.replace('/review/', ''));
+    } else if (path === '/login') {
+        authPage(false);
+    } else if (path === '/register') {
+        authPage(true);
+    } else {
+        app.innerHTML = '<div class="page-wrap"><div class="empty-state"><strong>Halaman tidak ditemukan</strong><p>Halaman yang kamu cari tidak tersedia.</p><p><a class="button button-primary button-small" href="/">Kembali ke beranda</a></p></div></div>';
+    }
+}
+
+window.addEventListener('DOMContentLoaded', route);
+window.addEventListener('popstate', route);
+
+document.addEventListener('click', (e) => {
+    const link = e.target.closest('a');
+    if (!link) return;
+    const href = link.getAttribute('href');
+    if (href && href.startsWith('/') && !link.hasAttribute('target')) {
+        e.preventDefault();
+        history.pushState(null, '', href);
+        route();
+    }
+});
+
+document.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const type = form.dataset.form;
+    if (type === 'login') submitAuth(form, false);
+    if (type === 'register') submitAuth(form, true);
+    if (type === 'quiz') submitQuiz(form);
+    if (type === 'post') submitPost(form);
+    if (type === 'review') submitreview(form);
+});
+
+document.addEventListener('click', (e) => {
+    const button = e.target.closest('button');
+    if (!button) return;
+    const action = button.dataset.action;
+    if (action === 'logout') {
+        clearSession();
+        location.assign('/login');
+    }
+    if (action === 'reload') {
+        route();
+    }
+    const page = button.dataset.page;
+    const target = button.dataset.target;
+    if (page && target) {
+        if (target === 'articles') loadArticles(Number(page));
+        if (target === 'quizzes') loadQuizzes(Number(page));
+        if (target === 'results') loadResults(Number(page));
+        if (target === 'forum') loadForum(Number(page));
+        if (target === 'reviews') loadReview(Number(page));
+    }
+});
+
 function adminNav(active) {
     const items = [
         ['dashboard', 'Ringkasan', '/admin/dashboard'],
@@ -675,24 +825,6 @@ function route() {
     updateHeader();
     const path = decodeURIComponent(location.pathname).replace(/\/+$/, '') || '/';
     const parts = path.split('/').filter(Boolean);
-    if (path === '/') return loadHome();
-    if (path === '/login') return authPage(false);
-    if (path === '/register') return authPage(true);
-    if (path === '/artikel') return loadArticles();
-    if (parts[0] === 'artikel' && parts[1]) return loadArticle(parts[1]);
-    if (path === '/kuis') return loadQuizzes();
-    if (parts[0] === 'kuis' && parts[1]) return loadQuiz(parts[1]);
-    if (path === '/hasil-kuis') return loadResults();
-    if (parts[0] === 'hasil-kuis' && parts[1]) return loadResult(parts[1]);
-    if (path === '/forum') return loadForum();
-    if (path === '/forum/buat') return createPostPage();
-    if (parts[0] === 'forum' && parts[1]) return loadPost(parts[1]);
-    if (path === '/profil') return loadProfile();
-    if (path === '/admin/dashboard') return loadAdminDashboard();
-    if (path === '/admin/artikel' || path === '/admin/kuis' || path === '/admin/forum' || path === '/admin/pengguna') return loadAdminList(parts[1]);
-    if (parts[0] === 'admin' && parts[1] === 'kuis' && parts[2]) return loadAdminQuiz(parts[2]);
-    if (parts[0] === 'admin' && parts[1] === 'forum' && parts[2]) return loadAdminForumPost(parts[2]);
-    if (parts[0] === 'admin' && parts[1] === 'pengguna' && parts[2]) return loadAdminUser(parts[2]);
     setPage('Halaman tidak ditemukan', '<div class="empty-state"><strong>Sepertinya kamu tersesat.</strong>Halaman ini tidak tersedia. Kembali ke awal dan lanjutkan belajar.<p style="margin-top:16px"><a class="button button-primary" href="/">Kembali ke beranda</a></p></div>', '404');
 }
 
@@ -710,4 +842,19 @@ navigation.addEventListener('click', (event) => {
     }
 });
 
+// Jalankan saat halaman dimuat dan saat tombol back/forward browser ditekan
+window.addEventListener('DOMContentLoaded', handleRoute);
+window.addEventListener('popstate', handleRoute);
+
+// Tangkap klik pada link internal agar tidak full reload
+document.addEventListener('click', (e) => {
+    const link = e.target.closest('a');
+    if (!link) return;
+    const href = link.getAttribute('href');
+    if (href && href.startsWith('/') && !link.hasAttribute('target')) {
+        e.preventDefault();
+        history.pushState(null, '', href);
+        handleRoute();
+    }
+});
 route();

@@ -2,65 +2,71 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\review;
+use App\Models\Review;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
-/**
- * ForumController  (sisi user & admin)
- *
- * Endpoint:
- *  GET  /forum/postingan                  (user, admin) — §10.1  KF-03
- *  POST /forum/postingan                  (user, admin) — §10.2  KF-03
- *  GET  /forum/postingan/{id}             (user, admin) — §10.3  KF-03
- *  GET  /forum/postingan/{id}/balasan     (user, admin) — §10.4  KF-03
- *  POST /forum/postingan/{id}/balasan     (user, admin) — §10.5  KF-03
- */
 class ReviewController extends Controller
 {
     // ─────────────────────────────────────────────
-    // §10.1  GET /forum/postingan
-    // q mencari: judul
-    // sort: tanggal (default -tanggal)
+    // GET /api/v1/review (atau /review/post)
     // ─────────────────────────────────────────────
     public function index(Request $request): JsonResponse
     {
-        $params = $this->paginasiParams($request);
-        if ($params === null) {
-            return $this->errorValidasi([
-                'page'  => ['Nilai page harus >= 1'],
-                'limit' => ['Nilai limit harus antara 1 dan 50'],
-            ]);
-        }
-
         $validator = Validator::make($request->query(), [
-            'q'    => 'nullable|string|max:100',
-            'sort' => 'nullable|string|in:tanggal,-tanggal',
+            'q'     => 'nullable|string|max:100',
+            'sort'  => 'nullable|string|in:dibuat_pada,-dibuat_pada,tanggal,-tanggal',
+            'page'  => 'nullable|integer|min:1',
+            'limit' => 'nullable|integer|min:1|max:50',
         ]);
+
         if ($validator->fails()) {
-            return $this->errorValidasi($validator->errors()->toArray());
+            return response()->json(['message' => 'Validasi gagal', 'errors' => $validator->errors()], 422);
         }
 
-        $sort  = $request->query('sort', '-tanggal');
-        $query = Review::with('penulis')->withCount('review user');
+        $page = $request->query('page', 1);
+        $limit = $request->query('limit', 9);
+        $sort = $request->query('sort', '-created_at');
+        $search = $request->query('q');
 
-        if ($request->filled('q')) {
-            $query->where('judul', 'like', '%' . $request->q . '%');
+        $query = Review::with('penulis');
+
+        if (!empty($search)) {
+            $query->where('judul', 'like', '%' . $search . '%')
+                  ->orWhere('isi', 'like', '%' . $search . '%');
         }
 
-        $query->orderBy('created_at', str_starts_with($sort, '-') ? 'desc' : 'asc');
+        // Tentukan arah sorting
+        $sortField = str_contains($sort, 'tanggal') ? 'created_at' : 'created_at';
+        $sortDirection = str_starts_with($sort, '-') ? 'desc' : 'asc';
+        
+        $query->orderBy($sortField, $sortDirection);
 
-        $paginator = $query->paginate($params['limit'], ['*'], 'page', $params['page']);
+        $paginator = $query->paginate($limit, ['*'], 'page', $page);
 
-        $data = $paginator->getCollection()->map(fn ($p) => $this->formatPostinganRingkas($p));
+        // Format data agar sesuai dengan yang dibaca oleh app.js
+        $formattedData = $paginator->getCollection()->map(function ($review) {
+            return [
+                'id'          => $review->id,
+                'judul'       => $review->judul,
+                'isi'         => $review->isi, // Kirim isi lengkap atau buat ringkasan
+                'dibuat_pada' => $review->created_at->toIso8601ZuluString(),
+                'penulis'     => $this->formatPenulis($review->penulis),
+            ];
+        });
 
-        return $this->suksesDaftar('Daftar postingan berhasil diambil', $data, $this->buildMeta($paginator));
+        return response()->json([
+            'data' => $formattedData,
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page'    => $paginator->lastPage(),
+                'per_page'     => $paginator->perPage(),
+                'total'        => $paginator->total(),
+            ]
+        ]);
     }
 
-    // ─────────────────────────────────────────────
-    // §10.2  POST /forum/postingan
-    // ─────────────────────────────────────────────
     public function store(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
@@ -69,7 +75,7 @@ class ReviewController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return $this->errorValidasi($validator->errors()->toArray());
+            return response()->json(['message' => 'Validasi gagal', 'errors' => $validator->errors()], 422);
         }
 
         $review = Review::create([
@@ -79,30 +85,35 @@ class ReviewController extends Controller
         ]);
 
         $review->load('penulis');
-        $review->loadCount('balasan as jumlah_balasan');
 
-        return $this->sukses('Postingan berhasil dibuat', $this->formatPostinganRingkas($review), 201);
+        return response()->json([
+            'message' => 'Review berhasil dibuat',
+            'data'    => [
+                'id'          => $review->id,
+                'judul'       => $review->judul,
+                'isi'         => $review->isi,
+                'dibuat_pada' => $review->created_at->toIso8601ZuluString(),
+                'penulis'     => $this->formatPenulis($review->penulis),
+            ]
+        ], 201);
     }
 
-    // ─────────────────────────────────────────────
-    // §10.3  GET /forum/postingan/{id}
-    // ─────────────────────────────────────────────
     public function show(int $id): JsonResponse
     {
-        $review = Review::with('penulis')
-            ->withCount('balasan as jumlah_balasan')
-            ->find($id);
+        $review = Review::with('penulis')->find($id);
 
-        if (! $review) {
-            return $this->error('Postingan tidak ditemukan', 'NOT_FOUND', 404);
+        if (!$review) {
+            return response()->json(['message' => 'Review tidak ditemukan'], 404);
         }
 
-        return $this->sukses('Detail postingan berhasil diambil', [
-            'id'             => $review->id,
-            'judul'          => $review->judul,
-            'isi'            => $review->isi,
-            'penulis'        => $this->formatPenulis($review->penulis),
-            'tanggal'        => $review->created_at->toIso8601ZuluString(),
+        return response()->json([
+            'data' => [
+                'id'          => $review->id,
+                'judul'       => $review->judul,
+                'isi'         => $review->isi,
+                'dibuat_pada' => $review->created_at->toIso8601ZuluString(),
+                'penulis'     => $this->formatPenulis($review->penulis),
+            ]
         ]);
     }
 
@@ -110,12 +121,12 @@ class ReviewController extends Controller
     {
         $review = Review::find($id);
 
-        if (! $review) {
-            return $this->error('Postingan tidak ditemukan', 'NOT_FOUND', 404);
+        if (!$review) {
+            return response()->json(['message' => 'Review tidak ditemukan'], 404);
         }
 
         if ($request->user()->id !== $review->user_id) {
-            return $this->error('Anda tidak memiliki izin untuk mengubah postingan ini', 'FORBIDDEN', 403);
+            return response()->json(['message' => 'Akses ditolak'], 403);
         }
 
         $validator = Validator::make($request->all(), [
@@ -124,7 +135,7 @@ class ReviewController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return $this->errorValidasi($validator->errors()->toArray());
+            return response()->json(['message' => 'Validasi gagal', 'errors' => $validator->errors()], 422);
         }
 
         $review->update([
@@ -132,12 +143,15 @@ class ReviewController extends Controller
             'isi'   => $request->isi,
         ]);
 
-        return $this->sukses('Postingan berhasil diperbarui', [
-            'id'             => $review->id,
-            'judul'          => $review->judul,
-            'isi'            => $review->isi,
-            'penulis'        => $this->formatPenulis($review->penulis),
-            'tanggal'        => $review->created_at->toIso8601ZuluString(),
+        return response()->json([
+            'message' => 'Review berhasil diperbarui',
+            'data'    => [
+                'id'          => $review->id,
+                'judul'       => $review->judul,
+                'isi'         => $review->isi,
+                'dibuat_pada' => $review->created_at->toIso8601ZuluString(),
+                'penulis'     => $this->formatPenulis($review->penulis),
+            ]
         ]);
     }
 
@@ -145,51 +159,26 @@ class ReviewController extends Controller
     {
         $review = Review::find($id);
 
-        if (! $review) {
-            return $this->error('Postingan tidak ditemukan', 'NOT_FOUND', 404);
+        if (!$review) {
+            return response()->json(['message' => 'Review tidak ditemukan'], 404);
         }
 
         if ($request->user()->id !== $review->user_id) {
-            return $this->error('Anda tidak memiliki izin untuk menghapus postingan ini', 'FORBIDDEN', 403);
+            return response()->json(['message' => 'Akses ditolak'], 403);
         }
 
         $review->delete();
-        return $this->sukses('Postingan berhasil dihapus', null, 200);
 
+        return response()->json(['message' => 'Review berhasil dihapus']);
     }
 
-    // ─────────────────────────────────────────────
-    // §10.4  GET /forum/postingan/{id}/balasan
-    // sort: tanggal (default tanggal = terlama dulu)
-    // ─────────────────────────────────────────────
-
-    // ─────────────────────────────────────────────
-    // Helper: format postingan ringkas (§4.6)
-    // ringkasan = 150 karakter pertama isi
-    // ─────────────────────────────────────────────
-    private function formatPostinganRingkas(Review $review): array
-    {
-        $isi       = $review->isi ?? '';
-        $ringkasan = mb_strlen($isi) > 150 ? mb_substr($isi, 0, 150) . '…' : $isi;
-
-        return [
-            'id'             => $review->id,
-            'judul'          => $review->judul,
-            'ringkasan'      => $ringkasan,
-            'penulis'        => $this->formatPenulis($review->penulis),
-            'tanggal'        => $review->created_at->toIso8601ZuluString(),
-        ];
-    }
-
-    // ─────────────────────────────────────────────
-    // Helper: format penulis ringkas (§4.2)
-    // ─────────────────────────────────────────────
     private function formatPenulis($user): array
     {
+        if (!$user) return ['id' => null, 'nama' => 'Pengguna', 'role' => 'user'];
         return [
             'id'   => $user->id,
-            'nama' => $user->nama,
-            'role' => $user->role,
+            'nama' => $user->nama ?? $user->name ?? 'Pengguna',
+            'role' => $user->role ?? 'user',
         ];
     }
 }
