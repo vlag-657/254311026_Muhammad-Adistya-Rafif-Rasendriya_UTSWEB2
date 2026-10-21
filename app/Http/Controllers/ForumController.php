@@ -108,6 +108,27 @@ class ForumController extends Controller
         ]);
     }
 
+    public function delete(int $id): JsonResponse
+    {
+         $postingan = Postingan::with('penulis')
+            ->withCount('balasan as jumlah_balasan')
+            ->find($id);
+            
+        if (! $postingan) {
+            return $this->error('Postingan tidak ditemukan', 'NOT_FOUND', 404);
+        }
+
+
+
+        // Hanya penulis postingan atau admin yang dapat menghapus postingan
+        if ($postingan->user_id !== auth()->id() && auth()->user()->role !== 'admin') {
+            return $this->error('Anda tidak memiliki izin untuk menghapus postingan ini', 'FORBIDDEN', 403);
+        }
+
+        $postingan->delete();
+
+        return $this->sukses('Postingan berhasil dihapus', null, 200);
+    }
     // ─────────────────────────────────────────────
     // §10.4  GET /forum/postingan/{id}/balasan
     // sort: tanggal (default tanggal = terlama dulu)
