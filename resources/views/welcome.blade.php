@@ -25,6 +25,7 @@
                 <a href="/kuis" data-nav-link>Kuis</a>
                 <a href="/forum" data-nav-link>Forum</a>
                 <a href="/hasil-kuis" data-nav-link data-auth-link>Hasil belajar</a>
+                <a href="/review" data-nav-link data-auth-link>Review</a>
             </nav>
             <div class="header-actions" id="account-actions">
                 <a class="button button-quiet button-small" href="/login">Masuk</a>
